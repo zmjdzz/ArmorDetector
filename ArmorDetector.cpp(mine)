@@ -1,0 +1,123 @@
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <math.h>
+#include<algorithm>
+
+using namespace std;
+using namespace cv;
+
+int main(void)
+{
+
+	Mat frame, mask, dst;
+	VideoCapture cap;
+
+	if (!cap.open("考核视频.avi"))
+	//if(!cap.open("7.MOV"))
+	{
+		cout << "video is err" << endl;
+		return -1;
+	}
+
+	
+	while (true)
+	{
+		cap >> frame;
+		if (frame.empty())
+		{
+			break;
+		}
+		//imshow("inputvideo", frame);
+		dst = frame.clone();
+		cvtColor(frame, frame, COLOR_BGR2HSV);
+
+		inRange(frame, Scalar(100, 92, 92), Scalar(124, 255, 255), mask);
+		Mat element = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+		//膨胀
+		dilate(mask, mask, element);
+		//开操作 掩膜
+		Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+		//开操作 消除噪点
+		morphologyEx(mask, mask, MORPH_OPEN, kernel);
+		//Canny(mask, mask, 100, 150, 3);
+		imshow("track mask", mask);
+
+		vector<vector<Point>> contours;
+		vector<vector<Point2f>> contours1;
+		vector<RotatedRect> lightInfos;
+		
+		//RotatedRect rotatedRect;
+		Rect rect;
+		Rect rect1;
+		findContours(mask, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
+		for (size_t i = 0; i < contours.size(); i++)
+		{
+			rect = boundingRect(contours[i]);
+			if (rect.width > 9 && rect.height > 9 && rect.width < 25 && rect.height < 30)//9 9 21 28
+			{
+				RotatedRect rotatedRect = fitEllipse(contours[i]);//RotatedRect 类型的矩形，是拟合出椭圆的最小外接矩形
+				lightInfos.push_back(rotatedRect);
+			}
+		}
+		
+		for (size_t i = 0; i < lightInfos.size(); i++)
+		{
+			for (size_t j = i + 1; j < lightInfos.size(); j++)
+			{
+				RotatedRect &leftLight = lightInfos[i];//左灯条
+				RotatedRect &rightLight = lightInfos[j];//右灯条
+				leftLight.size.width = max(leftLight.size.width, leftLight.size.height);
+				leftLight.size.height = min(leftLight.size.width, leftLight.size.height);
+				rightLight.size.width = max(rightLight.size.width, rightLight.size.height);
+				rightLight.size.height = min(rightLight.size.width, rightLight.size.height);
+				
+				
+				float angleDiff = abs(leftLight.angle - rightLight.angle);//角度差
+				float lrDiff1 = abs(leftLight.size.width / leftLight.size.height);//长宽比
+				float lrDiff2 = abs(rightLight.size.width / leftLight.size.width);
+				float angle1 = abs(leftLight.angle);
+				float angle2 = abs(rightLight.angle);
+				//筛选
+				if (angleDiff > 0.8 )//0.8   
+					continue;
+				
+				if (lrDiff1 > 1.7 || lrDiff2 > 1.7) continue;
+				//左右灯条长度的平均值
+				float meanLen = (leftLight.size.height + rightLight.size.height) / 2;
+				//左右灯条中心点x的差值
+				float xDiff = fabs(leftLight.center.x - rightLight.center.x);
+				//x差比率
+				float xDiff_ratio = xDiff / meanLen;
+				//左右灯条中心点y的差值
+				float yDiff = fabs(leftLight.center.y - rightLight.center.y);
+				//y差比率
+				float yDiff_ratio = yDiff / meanLen;
+				//相距距离与灯条长度比值
+				float ratio = xDiff / meanLen;
+				//lightInfos.push_back(rotatedRect);
+				//筛选
+				if (yDiff_ratio > 1.5 || xDiff_ratio < 1.0 ||
+					ratio > 15.0 || ratio < 0.9)//1.8 0.8 25.0 1.0
+				{
+					continue;
+				}
+
+				Point2f p1, p2;//定义将要圈出矩形的左上角点和右下角点
+				Point pl = leftLight.center, pr = rightLight.center;
+				p1.x = (pl.x - 0.5 * leftLight.size.height * sin(angle1) );//左灯条上中部点x坐标
+				p1.y = (pl.y - 0.5 * leftLight.size.height * cos(angle1) );//左灯条上中部点y坐标
+				p2.x = (pr.x + 0.5 * rightLight.size.height * sin(angle2) );//右灯条下中部点x坐标
+				p2.y = (pr.y + 0.5 * rightLight.size.height * cos(angle2) );//右灯条上中部点y坐标
+				
+				rectangle(dst, p1,p2, Scalar(0, 0, 255), 5);
+			}
+		}
+		imshow("dst", dst);
+
+		if (waitKey(8) > 0)
+			break;
+	}
+	cap.release();
+	destroyAllWindows();
+	return 0;
+}
